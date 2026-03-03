@@ -12,7 +12,7 @@ import Explore from './components/Explore';
 import Notifications from './components/Notifications';
 import Profile from './components/Profile';
 import Messages from './components/Messages';
-import { channelService } from './services/puterService';
+import { channelService } from './services/supabaseService';
 import './index.css';
 
 function App() {

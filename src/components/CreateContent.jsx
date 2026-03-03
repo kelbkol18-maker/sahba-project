@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { PenLine, Video as VideoIcon, Film, ImagePlus, Loader2, ArrowRight } from 'lucide-react';
-import { postService, videoService, shortsService, storageService } from '../services/puterService';
+import { postService, videoService, shortsService, storageService } from '../services/supabaseService';
+import { moderationService } from '../services/moderationService';
 
 const CreateContent = ({ user, hasChannel, channelId, onNavigate }) => {
     const [activeTab, setActiveTab] = useState('post'); // 'post', 'video', 'short'

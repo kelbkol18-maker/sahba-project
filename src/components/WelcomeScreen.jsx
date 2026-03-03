@@ -1,28 +1,75 @@
 import React, { useState } from 'react';
-import { authService, userService } from '../services/puterService';
+import { authService } from '../services/authService';
+import { userService } from '../services/supabaseService';
 
 const WelcomeScreen = ({ onLogin, onGuest }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [isSignUp, setIsSignUp] = useState(false);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [displayName, setDisplayName] = useState('');
 
-    const handlePuterLogin = async () => {
+    const handleSignUp = async (e) => {
+        e.preventDefault();
         setLoading(true);
         setError('');
         try {
-            const user = await authService.signIn();
-            // Fetch the full profile we just created/updated
-            const profile = await userService.getProfile(user.username);
+            if (!email || !password || !displayName) {
+                setError('يرجى ملء جميع الحقول');
+                setLoading(false);
+                return;
+            }
+            const user = await authService.signUp(email, password);
+            // Create user profile in Supabase
+            const profile = {
+                id: user.id,
+                email: user.email,
+                display_name: displayName,
+                avatar_url: null,
+                created_at: new Date().toISOString(),
+            };
+            await userService.update(user.id, profile);
             onLogin({
-                id: user.username,
-                name: user.username,
-                displayName: profile?.displayName || user.username,
+                id: user.id,
+                email: user.email,
+                name: displayName,
+                displayName: displayName,
                 avatar: null,
-                channelId: profile?.channelId || null,
-                source: 'puter',
+                source: 'supabase',
             });
         } catch (err) {
-            console.error('Puter login error:', err);
-            setError('تعذّر تسجيل الدخول. حاول مرة أخرى.');
+            console.error('Sign up error:', err);
+            setError(err.message || 'حدث خطأ أثناء التسجيل. حاول مرة أخرى.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSignIn = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        try {
+            if (!email || !password) {
+                setError('يرجى إدخال البريد الإلكتروني وكلمة المرور');
+                setLoading(false);
+                return;
+            }
+            const user = await authService.signIn(email, password);
+            // Fetch user profile
+            const profile = await userService.getById(user.id);
+            onLogin({
+                id: user.id,
+                email: user.email,
+                name: profile?.display_name || user.email,
+                displayName: profile?.display_name || user.email,
+                avatar: profile?.avatar_url || null,
+                source: 'supabase',
+            });
+        } catch (err) {
+            console.error('Sign in error:', err);
+            setError(err.message || 'تعذّر تسجيل الدخول. تحقق من بيانات الدخول.');
         } finally {
             setLoading(false);
         }
@@ -76,44 +123,85 @@ const WelcomeScreen = ({ onLogin, onGuest }) => {
                     ))}
                 </div>
 
-                {/* CTA Buttons */}
-                <div className="welcome-actions">
-                    <button
-                        className="btn-welcome-primary"
-                        onClick={handlePuterLogin}
-                        disabled={loading}
-                    >
-                        {loading ? (
-                            <span className="btn-spinner" />
-                        ) : (
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                                <polyline points="10 17 15 12 10 7" />
-                                <line x1="15" y1="12" x2="3" y2="12" />
-                            </svg>
-                        )}
-                        {loading ? 'جاري الدخول...' : 'تسجيل الدخول عبر Puter'}
-                    </button>
-
-                    <div className="welcome-or">
-                        <span>أو</span>
-                    </div>
-
-                    <button
-                        className="btn-welcome-ghost"
-                        onClick={handleGuest}
-                    >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                            <circle cx="12" cy="7" r="4" />
-                        </svg>
-                        المتابعة كضيف
-                    </button>
-
-                    {error && (
-                        <p className="welcome-error animate-fade-in">{error}</p>
+                {/* Auth Form */}
+                <form className="welcome-auth-form" onSubmit={isSignUp ? handleSignUp : handleSignIn}>
+                    {isSignUp && (
+                        <input
+                            type="text"
+                            placeholder="اسم المستخدم"
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
+                            disabled={loading}
+                            className="auth-input"
+                        />
                     )}
-                </div>
+                    <input
+                        type="email"
+                        placeholder="البريد الإلكتروني"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        disabled={loading}
+                        className="auth-input"
+                    />
+                    <input
+                        type="password"
+                        placeholder="كلمة المرور"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={loading}
+                        className="auth-input"
+                    />
+
+                    {/* CTA Buttons */}
+                    <div className="welcome-actions">
+                        <button
+                            type="submit"
+                            className="btn-welcome-primary"
+                            disabled={loading}
+                        >
+                            {loading ? (
+                                <span className="btn-spinner" />
+                            ) : (
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                                    <polyline points="10 17 15 12 10 7" />
+                                    <line x1="15" y1="12" x2="3" y2="12" />
+                                </svg>
+                            )}
+                            {loading ? 'جاري المعالجة...' : (isSignUp ? 'إنشاء حساب' : 'تسجيل الدخول')}
+                        </button>
+
+                        <button
+                            type="button"
+                            className="btn-welcome-ghost"
+                            onClick={() => setIsSignUp(!isSignUp)}
+                            disabled={loading}
+                        >
+                            {isSignUp ? 'لديك حساب بالفعل؟ سجل الدخول' : 'ليس لديك حساب؟ أنشئ واحداً'}
+                        </button>
+
+                        <div className="welcome-or">
+                            <span>أو</span>
+                        </div>
+
+                        <button
+                            type="button"
+                            className="btn-welcome-ghost"
+                            onClick={handleGuest}
+                            disabled={loading}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                <circle cx="12" cy="7" r="4" />
+                            </svg>
+                            المتابعة كضيف
+                        </button>
+
+                        {error && (
+                            <p className="welcome-error animate-fade-in">{error}</p>
+                        )}
+                    </div>
+                </form>
 
                 {/* Footer note */}
                 <p className="welcome-footer-note">
