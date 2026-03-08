@@ -3,12 +3,5 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "vite",
-  "outputDirectory": "dist",
-  "env": {
-    "VITE_SUPABASE_URL": "https://pdnyfjzpkpajaaqtgsjv.supabase.co
-",
-    "VITE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBkbnlmanpwa3BhamFhcXRnc2p2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1MjM3MTgsImV4cCI6MjA4ODA5OTcxOH0.QGXr_gSrpz-49MqyefN9Wbj1M7JTaWH30cOGfbPxbXs
-",
-    "OPENAI_API_KEY": "openai_api_key"
-  }
+  "outputDirectory": "dist"
 }
