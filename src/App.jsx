@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Home, Compass, PlaySquare, Bell, User } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import HomeFeed from './components/HomeFeed';
@@ -12,17 +12,23 @@ import Explore from './components/Explore';
 import Notifications from './components/Notifications';
 import Profile from './components/Profile';
 import Messages from './components/Messages';
-import { channelService } from './services/supabaseService';
+import UsageLockOverlay from './components/UsageLockOverlay';
+import PrayerReminderBanner from './components/PrayerReminderBanner';
+import { authService, channelService, profileService } from './services/supabaseService';
+import { useDailyUsageLimit } from './hooks/useDailyUsageLimit';
+import { usePrayerReminder } from './hooks/usePrayerReminder';
 import './index.css';
 
 function App() {
   const [authState, setAuthState] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [currentView, setCurrentView] = useState('home');
   const [userChannel, setUserChannel] = useState(null);
   const [selectedChannelId, setSelectedChannelId] = useState(null);
-
-  // Load Auth Stated channel info
-  const [loadingChannel, setLoadingChannel] = useState(false);
+  const [hidePrayerInfo, setHidePrayerInfo] = useState(false);
+  const usageLimit = useDailyUsageLimit({ enabled: !!authState });
+  const prayerReminder = usePrayerReminder({ enabled: !!authState });
+  const hasPrayerBanner = !!prayerReminder.reminder || !!prayerReminder.locationError || (!!prayerReminder.nextPrayer && !hidePrayerInfo);
 
   const mobileNavItems = [
     { icon: Home, view: 'home', label: 'الرئيسية' },
@@ -32,32 +38,102 @@ function App() {
     { icon: User, view: 'profile', label: 'حسابي' },
   ];
 
-  // Load user channel when logged in (not guest)
-  useEffect(() => {
-    if (authState && authState.mode === 'user') {
-      loadUserChannel(authState.id);
-    }
-  }, [authState]);
-
-  const loadUserChannel = async (userId) => {
-    setLoadingChannel(true);
+  const loadUserChannel = useCallback(async (userId) => {
     try {
       const channel = await channelService.getByOwner(userId);
       setUserChannel(channel);
     } catch (err) {
       console.error('Error loading channel:', err);
-    } finally {
-      setLoadingChannel(false);
     }
-  };
+  }, []);
+
+  const hydrateAuthUser = useCallback(async (user) => {
+    if (!user) {
+      setAuthState(null);
+      setUserChannel(null);
+      return;
+    }
+
+    let profile = null;
+    try {
+      profile = await profileService.getById(user.id);
+    } catch (err) {
+      console.warn('Profile fetch skipped after auth:', err?.message || err);
+    }
+
+    const nameFromMeta = user.user_metadata?.display_name;
+    setAuthState({
+      mode: 'user',
+      id: user.id,
+      email: user.email,
+      name: profile?.display_name || nameFromMeta || user.email,
+      displayName: profile?.display_name || nameFromMeta || user.email,
+      avatar: profile?.avatar_url || null,
+    });
+    loadUserChannel(user.id);
+  }, [loadUserChannel]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const bootstrapAuth = async () => {
+      try {
+        const session = await authService.getSession();
+        if (!mounted) return;
+        await hydrateAuthUser(session?.user || null);
+      } catch (err) {
+        // Supabase غير متاح (مثلاً: متغيرات البيئة مفقودة في Vercel)
+        console.error('Auth bootstrap failed:', err?.message || err);
+        if (mounted) setAuthLoading(false);
+      } finally {
+        if (mounted) setAuthLoading(false);
+      }
+    };
+
+    bootstrapAuth();
+
+    let subscription = null;
+    try {
+      subscription = authService.onAuthStateChange(async (_event, session) => {
+        if (!mounted) return;
+        await hydrateAuthUser(session?.user || null).catch(() => { });
+        setAuthLoading(false);
+      });
+    } catch (err) {
+      console.error('onAuthStateChange failed:', err?.message || err);
+    }
+
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe?.();
+    };
+  }, [hydrateAuthUser]);
 
   // Handlers
   const handleLogin = (userData) => {
     setAuthState({ mode: 'user', ...userData });
+    loadUserChannel(userData.id);
+    setAuthLoading(false);
   };
 
   const handleGuest = () => {
+    setUserChannel(null);
     setAuthState({ mode: 'guest', id: 'guest', name: 'ضيف' });
+    setAuthLoading(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authService.signOut();
+    } catch (err) {
+      console.error('Sign out failed:', err);
+    } finally {
+      setUserChannel(null);
+      setAuthState(null);
+      setCurrentView('home');
+      setHidePrayerInfo(false);
+      setAuthLoading(false);
+    }
   };
 
   const handleChannelCreated = (channel) => {
@@ -73,19 +149,54 @@ function App() {
   };
 
   // ─── Show Welcome Screen if not authenticated ─────────────────────────────
+  if (authLoading) {
+    return (
+      <div className="welcome-screen">
+        <div className="welcome-card animate-fade-up" style={{ textAlign: 'center' }}>
+          <p className="text-secondary">جارٍ التحقق من الجلسة...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!authState) {
     return <WelcomeScreen onLogin={handleLogin} onGuest={handleGuest} />;
+  }
+
+  if (usageLimit.locked) {
+    return <UsageLockOverlay resetAt={usageLimit.resetAt} />;
   }
 
   // ─── Main App ─────────────────────────────────────────────────────────────
   return (
     <>
-      <div className="app-layout">
+      {hasPrayerBanner && (
+        <PrayerReminderBanner
+          reminder={prayerReminder.reminder}
+          nextPrayer={hidePrayerInfo ? null : prayerReminder.nextPrayer}
+          locationError={prayerReminder.locationError}
+          loadingLocation={prayerReminder.loading}
+          onRetryLocation={() => {
+            setHidePrayerInfo(false);
+            prayerReminder.requestLocation();
+          }}
+          onDismiss={() => {
+            if (prayerReminder.reminder) {
+              prayerReminder.dismissReminder();
+            } else {
+              setHidePrayerInfo(true);
+            }
+          }}
+        />
+      )}
+
+      <div className={`app-layout ${hasPrayerBanner ? 'app-layout-with-banner' : ''}`}>
         <Sidebar
           setView={setCurrentView}
           currentView={currentView}
           user={authState}
           hasChannel={!!userChannel}
+          onLogout={handleLogout}
         />
 
         <main className="main-content">
